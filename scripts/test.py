@@ -1,11 +1,16 @@
 #!/usr/bin/env python
-"""Run the pretrained BayerDemosaick model on a real hardware raw dump.
+"""Run the pretrained BayerDemosaick model on real hardware raw dumps.
 
-Expected input: a flat, headerless binary file holding a single-channel
+Recursively finds every `.raw` file under --input_dir and writes its result
+under --output_dir, mirroring the same relative directory layout.
+
+Expected input: flat, headerless binary files each holding a single-channel
 Bayer mosaic that has already gone through BLC, raw denoise, LSC and WB in
 the hardware ISP (i.e. linear, black-level-corrected, white-balanced sensor
-data -- just not demosaicked yet). The network was trained on synthetically
-re-mosaicked sRGB (gamma-encoded) images, so this script:
+data -- just not demosaicked yet). All files must share the same --height,
+--width, --in_bitwidth and --bayer_pattern. The network was trained on
+synthetically re-mosaicked sRGB (gamma-encoded) images, so for each file
+this script:
 
   1. normalizes the raw samples to [0, 1] using --in_bitwidth,
   2. Gamma-encodes them (fixed gamma = 2.2) to match the network's domain,
@@ -46,6 +51,16 @@ _FLIP_TO_GRBG = {
 }
 
 
+def _find_raw_files(input_dir):
+    raw_files = []
+    for root, _, files in os.walk(input_dir):
+        for f in files:
+            if f.lower().endswith(".raw"):
+                raw_files.append(os.path.join(root, f))
+    raw_files.sort()
+    return raw_files
+
+
 def _read_raw(path, height, width, bitwidth):
     dtype = np.uint8 if bitwidth <= 8 else np.uint16
     raw = np.fromfile(path, dtype=dtype)
@@ -81,8 +96,8 @@ def _undo_flip(img_hwc, flips):
     return np.ascontiguousarray(img_hwc)
 
 
-def main(args):
-    raw = _read_raw(args.input, args.height, args.width, args.in_bitwidth)
+def _process_one(model, device, raw_path, out_bin_path, args):
+    raw = _read_raw(raw_path, args.height, args.width, args.in_bitwidth)
 
     pattern_name = _PATTERN_NAMES[args.bayer_pattern]
     raw, flips = _align_to_grbg(raw, pattern_name)
@@ -94,10 +109,7 @@ def main(args):
     mosaic3 = np.stack([gamma_encoded] * 3, axis=0)  # [3, h, w]
     mosaic = demosaicnet.bayer(mosaic3)  # zeroes out non-sampled channels (GRBG)
 
-    model = demosaicnet.BayerDemosaick(pretrained=True, pad=True).to(args.device)
-    model.eval()
-
-    mosaic_t = th.from_numpy(mosaic).unsqueeze(0).to(args.device)
+    mosaic_t = th.from_numpy(mosaic).unsqueeze(0).to(device)
     with th.no_grad():
         out = model(mosaic_t).squeeze(0).cpu().numpy()  # [3, h, w]
 
@@ -111,22 +123,42 @@ def main(args):
     out_dtype = np.uint8 if args.out_bitwidth <= 8 else np.uint16
     quantized = np.round(np.clip(out_hwc, 0.0, 1.0) * out_max).astype(out_dtype)
 
-    quantized.tofile(args.output)
-    print("Wrote {} ({}x{}x3, {})".format(
-        args.output, args.height, args.width, out_dtype.__name__))
+    os.makedirs(os.path.dirname(out_bin_path), exist_ok=True)
+    quantized.tofile(out_bin_path)
 
-    png_path = os.path.splitext(args.output)[0] + ".png"
+    png_path = os.path.splitext(out_bin_path)[0] + ".png"
     png = np.round(np.clip(out_hwc, 0.0, 1.0) * 255.0).astype(np.uint8)
     imageio.imsave(png_path, png)
-    print("Wrote {} (linear-domain preview, un-gamma'd so it may look dark "
-          "in a normal viewer)".format(png_path))
+
+    return png_path
+
+
+def main(args):
+    raw_files = _find_raw_files(args.input_dir)
+    if not raw_files:
+        raise ValueError("No .raw files found under {}".format(args.input_dir))
+
+    model = demosaicnet.BayerDemosaick(pretrained=True, pad=True).to(args.device)
+    model.eval()
+
+    out_dtype_name = "uint8" if args.out_bitwidth <= 8 else "uint16"
+    for raw_path in raw_files:
+        rel_path = os.path.relpath(raw_path, args.input_dir)
+        out_bin_path = os.path.join(
+            args.output_dir, os.path.splitext(rel_path)[0] + ".bin")
+
+        png_path = _process_one(model, args.device, raw_path, out_bin_path, args)
+
+        print("{} -> {} ({}x{}x3, {}) + {}".format(
+            raw_path, out_bin_path, args.height, args.width,
+            out_dtype_name, png_path))
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__,
                                      formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("input", help="path to the raw binary dump (flat, no header).")
-    parser.add_argument("output", help="path to write the demosaicked HWC binary.")
+    parser.add_argument("input_dir", help="root directory to search recursively for .raw files.")
+    parser.add_argument("output_dir", help="root directory to mirror results into.")
     parser.add_argument("--height", type=int, required=True, help="image height (imgH).")
     parser.add_argument("--width", type=int, required=True, help="image width (imgW).")
     parser.add_argument("--in_bitwidth", type=int, default=12,

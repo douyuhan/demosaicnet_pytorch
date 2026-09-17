@@ -4,3 +4,4 @@ demosaicnet.egg-info
 build/
 data
 .DS_Store
+test_data/

@@ -31,14 +31,14 @@ To train a dummy model on the demo dataset provided, run:
 python scripts/train.py --data demosaicnet/data/dummy_dataset --checkpoint_dir ckpt
 ```
 
-To run the pretrained Bayer model on a real raw sensor dump (e.g. to slot it into an existing hardware ISP in place of its demosaic stage), use `scripts/test.py`. The input must be a flat, headerless binary of a single-channel Bayer mosaic that has already been through BLC, raw denoise, LSC and WB (still linear, not yet demosaicked or color-corrected):
+To run the pretrained Bayer model on real raw sensor dumps (e.g. to slot it into an existing hardware ISP in place of its demosaic stage), use `scripts/test.py`. It recursively searches `input_dir` for `.raw` files and mirrors the same relative layout under `output_dir`. Each input must be a flat, headerless binary of a single-channel Bayer mosaic that has already been through BLC, raw denoise, LSC and WB (still linear, not yet demosaicked or color-corrected), and all files must share the same size/bitwidth/pattern:
 
 ```shell
-python scripts/test.py <input.raw> <output.bin> --height <H> --width <W> \
+python scripts/test.py <input_dir> <output_dir> --height <H> --width <W> \
     --in_bitwidth 12 --out_bitwidth 8 --bayer_pattern <0=BGGR|1=GBRG|2=GRBG|3=RGGB>
 ```
 
-It Gamma-encodes the input, runs the network, inverse-Gammas the output back to a pseudo-linear domain, and writes an HWC binary (plus a `.png` preview) meant to be fed onward into your pipeline's own CCM/Gamma/YUV stages.
+It Gamma-encodes each input, runs the network, inverse-Gammas the output back to a pseudo-linear domain, and writes an HWC binary (plus a `.png` preview) meant to be fed onward into your pipeline's own CCM/Gamma/YUV stages.
 
 To build and update the whee:
 
