@@ -2,7 +2,7 @@
 """Demo script on using demosaicnet for inference."""
 
 import os
-from pkg_resources import resource_filename
+from importlib.resources import files
 
 import argparse
 import numpy as np
@@ -11,7 +11,7 @@ import imageio
 
 import demosaicnet
 
-_TEST_INPUT = resource_filename("demosaicnet", 'data/test_input.png')
+_TEST_INPUT = str(files("demosaicnet") / "data" / "test_input.png")
 
 def main(args):
   print("Running demosaicnet demo on {}, outputing to {}".format(_TEST_INPUT, args.output))

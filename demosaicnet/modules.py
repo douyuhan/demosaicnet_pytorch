@@ -1,7 +1,7 @@
 """Models for [Gharbi2016] Deep Joint demosaicking and denoising."""
 import os
 from collections import OrderedDict
-from pkg_resources import resource_filename
+from importlib.resources import files
 
 import numpy as np
 import torch as th
@@ -11,8 +11,8 @@ import torch.nn as nn
 __all__ = ["BayerDemosaick", "XTransDemosaick"]
 
 
-_BAYER_WEIGHTS = resource_filename(__name__, 'data/bayer.pth')
-_XTRANS_WEIGHTS = resource_filename(__name__, 'data/xtrans.pth')
+_BAYER_WEIGHTS = str(files("demosaicnet") / "data" / "bayer.pth")
+_XTRANS_WEIGHTS = str(files("demosaicnet") / "data" / "xtrans.pth")
 
 
 class BayerDemosaick(nn.Module):
